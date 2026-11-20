@@ -47,7 +47,28 @@ def clean_environment(cwd):
     }
 
 
-def sandbox_profile(cwd, compiler=None, allow_processes=False, read_paths=()):
+def developer_toolchain_root():
+    """Resolve the selected Apple tools, including versioned full Xcode bundles."""
+    try:
+        selected = subprocess.run(
+            ["/usr/bin/xcode-select", "--print-path"], capture_output=True,
+            text=True, timeout=5, env={"PATH": "/usr/bin:/bin", "LANG": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if selected.returncode or not selected.stdout.strip():
+        return None
+    directory = Path(selected.stdout.strip()).resolve()
+    # Libraries outside Contents/Developer can belong to the same trusted app bundle.
+    for parent in directory.parents:
+        if parent.suffix == ".app":
+            return str(parent)
+    if directory in (Path("/"), Path.home(), Path.home().parent):
+        return None
+    return str(directory)
+
+
+def sandbox_profile(cwd, compiler=None, allow_processes=False, read_paths=(), toolchain_root=None):
     read_roots = {
         "/System", "/usr", "/bin", "/sbin", "/Library/Developer",
         "/Library/Apple", "/Library/Preferences/com.apple.dt.Xcode.plist",
@@ -65,6 +86,8 @@ def sandbox_profile(cwd, compiler=None, allow_processes=False, read_paths=()):
         if prefix not in (Path("/"), Path.home(), Path.home().parent):
             read_roots.add(str(prefix))
         read_roots.add(str(path))
+    if allow_processes and toolchain_root:
+        read_roots.add(toolchain_root)
     reads = "\n".join(f"  (subpath {json.dumps(p)})" for p in sorted(read_roots))
     reads += "\n" + "\n".join(f"  (literal {json.dumps(str(Path(p).resolve()))})" for p in read_paths)
     return f"""(version 1)
@@ -99,13 +122,15 @@ class Runner:
             isolation = "macos"
         self.isolation = isolation
         self.compiler = compiler
+        self.toolchain_root = developer_toolchain_root() if isolation == "macos" and compiler else None
 
     def run(self, command, cwd, timeout, *, allow_processes=False, read_paths=()):
         cwd = Path(cwd).resolve()
         original = [str(value) for value in command]
         command = original
         if self.isolation == "macos":
-            command = ["/usr/bin/sandbox-exec", "-p", sandbox_profile(cwd, self.compiler, allow_processes, read_paths), *command]
+            profile = sandbox_profile(cwd, self.compiler, allow_processes, read_paths, self.toolchain_root)
+            command = ["/usr/bin/sandbox-exec", "-p", profile, *command]
 
         def limits():
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))

@@ -1,15 +1,34 @@
 import os
 from pathlib import Path
 import platform
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from py2cpp_bench.runner import OUTPUT_LIMIT, Runner, clean_environment
+from py2cpp_bench.runner import (OUTPUT_LIMIT, Runner, clean_environment,
+                                developer_toolchain_root, sandbox_profile)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_full_xcode_is_readable_only_during_compilation(self):
+        selected = subprocess.CompletedProcess([], 0, "/Applications/Xcode_26.6.app/Contents/Developer\n", "")
+        with patch("py2cpp_bench.runner.subprocess.run", return_value=selected):
+            root = developer_toolchain_root()
+        self.assertEqual(root, "/Applications/Xcode_26.6.app")
+        profile = sandbox_profile("/tmp/example", allow_processes=True, toolchain_root=root)
+        self.assertIn('(subpath "/Applications/Xcode_26.6.app")', profile)
+        self.assertNotIn('(subpath "/Applications")', profile)
+        self.assertNotIn(root, sandbox_profile("/tmp/example", toolchain_root=root))
+
+    def test_command_line_tools_and_missing_developer_selection(self):
+        with patch("py2cpp_bench.runner.subprocess.run", return_value=subprocess.CompletedProcess(
+                [], 0, "/Library/Developer/CommandLineTools\n", "")):
+            self.assertEqual(developer_toolchain_root(), "/Library/Developer/CommandLineTools")
+        with patch("py2cpp_bench.runner.subprocess.run", return_value=subprocess.CompletedProcess([], 1, "", "missing")):
+            self.assertIsNone(developer_toolchain_root())
+
     def test_subprocess_has_no_credentials_or_loader_injection(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
             "OPENAI_API_KEY": "fixture-secret", "AWS_SECRET_ACCESS_KEY": "other-secret", "DYLD_INSERT_LIBRARIES": "evil",
