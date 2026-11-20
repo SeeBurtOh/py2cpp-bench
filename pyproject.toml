@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py2cpp-bench"
+version = "0.1.0"
+description = "One-shot, bring-your-own-key Python to C++ optimization benchmarks"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+keychain = ["keyring>=25.6,<26"]
+
+[project.scripts]
+py2cpp-bench = "py2cpp_bench.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["py2cpp_bench*"]
+
+[tool.setuptools.package-data]
+py2cpp_bench = ["examples/*.py", "examples/*.cpp"]
